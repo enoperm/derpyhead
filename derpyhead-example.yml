@@ -1,0 +1,4 @@
+---
+filter:
+  exclude: 'no-derp-for-these-namespaces-.*'
+  include: '.*'
