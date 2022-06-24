@@ -98,7 +98,5 @@ func setKeysCommand(whole string) {
 	appConfig.keysCommand = argv[0]
 	if len(argv) > 1 {
 		appConfig.keysCommandArgs = argv[1:]
-	} else {
-		appConfig.keysCommandArgs = appConfig.keysCommandArgs[:0]
 	}
 }
