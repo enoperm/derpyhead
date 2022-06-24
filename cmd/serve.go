@@ -30,7 +30,11 @@ var serveCmd = &cobra.Command{
 	Short: "Provide just enough of a tailscaled.sock to allow derper to work",
 	Run: func(cmd *cobra.Command, args []string) {
 		go func() {
-			ticker := time.NewTicker(time.Duration(appConfig.updateInterval) * time.Second)
+			dur, err := time.ParseDuration(appConfig.updateInterval)
+			if err != nil {
+				log.Fatalf("config: update-interval: %q, %s", appConfig.updateInterval, err)
+			}
+			ticker := time.NewTicker(dur)
 			defer ticker.Stop()
 
 			updateCache()

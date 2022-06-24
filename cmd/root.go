@@ -13,11 +13,11 @@ import (
 var keysCommandWhole string
 
 var appConfig struct {
-	updateInterval  int64
+	updateInterval  string
 	configFile      string
+	listenAddr      string
 	keysCommand     string
 	keysCommandArgs []string
-	listenAddr      string
 }
 
 // rootCmd represents the base command when called without any subcommands
@@ -46,7 +46,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&appConfig.configFile, "config", "", "config file (default is $PWD/derpyhead.yaml)")
 	rootCmd.PersistentFlags().StringVar(&appConfig.listenAddr, "listen-path", "derpyhead.sock", "path of unix socket to serve peer IDs on")
 	rootCmd.PersistentFlags().StringVar(&keysCommandWhole, "keys-command", "", "command to run when querying keys (must return one nodekey per line)")
-	rootCmd.PersistentFlags().Int64Var(&appConfig.updateInterval, "update-interval", 10, "seconds between executions of keys-command")
+	rootCmd.PersistentFlags().StringVar(&appConfig.updateInterval, "update-interval", "10s", "interval between executions of keys-command")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -80,7 +80,7 @@ func initConfig() {
 }
 
 func readConfig() {
-	if val := viper.GetInt64("update-interval"); true {
+	if val := viper.GetString("update-interval"); len(val) > 0 {
 		appConfig.updateInterval = val
 	}
 
