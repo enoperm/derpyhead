@@ -1,15 +1,18 @@
 package cmd
 
 import (
-	"database/sql"
+	"bufio"
+	"context"
 	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
+	"sync"
+	"time"
 
-	_ "github.com/mattn/go-sqlite3"
 	"github.com/spf13/cobra"
 
 	"go4.org/mem"
@@ -17,10 +20,25 @@ import (
 	"tailscale.com/types/key"
 )
 
+var cache struct {
+	mutex sync.Mutex
+	keys  []key.NodePublic
+}
+
 var serveCmd = &cobra.Command{
 	Use:   "serve",
 	Short: "Provide just enough of a tailscaled.sock to allow derper to work",
 	Run: func(cmd *cobra.Command, args []string) {
+		go func() {
+			ticker := time.NewTicker(time.Duration(appConfig.updateInterval) * time.Second)
+			defer ticker.Stop()
+
+			updateCache()
+			for range ticker.C {
+				updateCache()
+			}
+		}()
+
 		http.HandleFunc("/", respondPeerIds)
 		os.Remove(appConfig.listenAddr)
 		listenSock, err := net.Listen("unix", appConfig.listenAddr)
@@ -32,75 +50,63 @@ var serveCmd = &cobra.Command{
 	},
 }
 
-func init() {
-	// Cobra also supports local flags, which will only run
-	// when this action is called directly.
-	//rootCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+func updateCache() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, appConfig.keysCommand, appConfig.keysCommandArgs...)
+	output, err := cmd.StdoutPipe()
+	if err != nil {
+		log.Fatal("update-cache:", err)
+	}
+
+	cmd.Start()
+
+	newKeys := make([]key.NodePublic, 0, 64)
+	buffered := bufio.NewScanner(output)
+	for buffered.Scan() {
+		kstring := buffered.Text()
+		if len(kstring) < 1 {
+			continue
+		}
+
+		nodeKey, err := hex.DecodeString(kstring)
+		if err != nil {
+			log.Printf("update-cache: read-key: %q: %s", kstring, err)
+			return
+		}
+		k := key.NodePublicFromRaw32(mem.B(nodeKey))
+		newKeys = append(newKeys, k)
+	}
+
+	err = cmd.Wait()
+	if err != nil {
+		log.Printf("update-cache: %s", err)
+		return
+	}
+
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+	cache.keys = newKeys
 }
 
 func respondPeerIds(w http.ResponseWriter, req *http.Request) {
-	status, err := fetchStatus()
-	if err != nil {
-		log.Println(err)
-		os.Stdout.WriteString(err.Error())
-		return
-	}
+	status := buildStatus()
 	encoder := json.NewEncoder(w)
 	encoder.Encode(status)
 }
 
-func fetchStatus() (status *ipnstate.Status, err error) {
-	db, err := sql.Open("sqlite3", appConfig.sourceDatabase)
-	if err != nil {
-		return
-	}
-	defer db.Close()
-
+func buildStatus() (status *ipnstate.Status) {
 	sb := ipnstate.StatusBuilder{}
-	rows, err := db.Query(`
-		SELECT machines.node_key, namespaces.name AS namespace_name
-		FROM machines, namespaces
-		WHERE machines.namespace_id = namespaces.id
-	`)
 
-	switch {
-	case err == sql.ErrNoRows:
-		err = nil
-		fallthrough
-	case err != nil:
-		return
-	}
+	func() {
+		cache.mutex.Lock()
+		defer cache.mutex.Unlock()
 
-	type record struct {
-		nodeKey   string
-		namespace string
-	}
-
-	dummyStatus := &ipnstate.PeerStatus{}
-	process := func(nodeKey, namespace string) error {
-		if appConfig.excludeRegex != nil && appConfig.excludeRegex.MatchString(namespace) {
-			return nil
+		for _, k := range cache.keys {
+			sb.AddPeer(k, &ipnstate.PeerStatus{})
 		}
-
-		nodeKeyAssHex, err := hex.DecodeString(nodeKey)
-		if err != nil {
-			return err
-		}
-		k := key.NodePublicFromRaw32(mem.B(nodeKeyAssHex))
-		sb.AddPeer(k, dummyStatus)
-		return nil
-	}
-
-	for rows.Next() {
-		nodeKey, namespace := new(string), new(string)
-		rows.Scan(nodeKey, namespace)
-		if appConfig.includeRegex == nil || appConfig.includeRegex.MatchString(*namespace) {
-			err = process(*nodeKey, *namespace)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
+	}()
 
 	status = sb.Status()
 	var nullKey [32]byte

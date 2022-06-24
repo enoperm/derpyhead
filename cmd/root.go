@@ -2,33 +2,28 @@ package cmd
 
 import (
 	"log"
-	"regexp"
 
 	"github.com/spf13/cobra"
 
 	"github.com/spf13/viper"
 
-	"github.com/fsnotify/fsnotify"
+	"github.com/google/shlex"
 )
 
+var keysCommandWhole string
+
 var appConfig struct {
-	configFile     string
-	sourceDatabase string
-	listenAddr     string
-	includeRegex   *regexp.Regexp
-	excludeRegex   *regexp.Regexp
+	updateInterval  int64
+	configFile      string
+	keysCommand     string
+	keysCommandArgs []string
+	listenAddr      string
 }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use:   "derpyhead",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "tiny nodekey provider for derper",
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	// Run: func(cmd *cobra.Command, args []string) { },
@@ -50,7 +45,8 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&appConfig.configFile, "config", "", "config file (default is $PWD/derpyhead.yaml)")
 	rootCmd.PersistentFlags().StringVar(&appConfig.listenAddr, "listen-path", "derpyhead.sock", "path of unix socket to serve peer IDs on")
-	rootCmd.PersistentFlags().StringVar(&appConfig.sourceDatabase, "source-db", "", "sqlite3 database to serve information from")
+	rootCmd.PersistentFlags().StringVar(&keysCommandWhole, "keys-command", "", "command to run when querying keys (must return one nodekey per line)")
+	rootCmd.PersistentFlags().Int64Var(&appConfig.updateInterval, "update-interval", 10, "seconds between executions of keys-command")
 
 	// Cobra also supports local flags, which will only run
 	// when this action is called directly.
@@ -69,40 +65,40 @@ func initConfig() {
 
 	viper.AutomaticEnv() // read in environment variables that match
 
-	viper.OnConfigChange(func(e fsnotify.Event) {
-		if e.Op&fsnotify.Write != 0 {
-			log.Println("config reload detected", viper.ConfigFileUsed())
-			readConfig()
-		}
-	})
-
 	if err := viper.ReadInConfig(); err == nil {
 		log.Println("using config file:", viper.ConfigFileUsed())
 		readConfig()
 	}
 
-	go viper.WatchConfig()
+	if len(keysCommandWhole) > 0 {
+		setKeysCommand(keysCommandWhole)
+	}
+
+	if len(appConfig.keysCommand) < 1 {
+		log.Fatal("must specify a command to fetch node keys with")
+	}
 }
 
 func readConfig() {
-	filterConfig := viper.GetStringMapString("filter")
-	if val, ok := filterConfig["include"]; ok {
-		pat, err := regexp.Compile(val)
-		if err == nil {
-			appConfig.includeRegex = pat
-		} else {
-			log.Println(err)
-		}
+	if val := viper.GetInt64("update-interval"); true {
+		appConfig.updateInterval = val
 	}
-	if val, ok := filterConfig["exclude"]; ok {
-		pat, err := regexp.Compile(val)
-		if err == nil {
-			appConfig.excludeRegex = pat
-		} else {
-			log.Println(err)
-		}
+
+	if val := viper.GetString("keys-command"); len(val) > 0 {
+		setKeysCommand(val)
 	}
-	if val := viper.GetString("source-db"); len(val) > 0 {
-		appConfig.sourceDatabase = val
+}
+
+func setKeysCommand(whole string) {
+	argv, err := shlex.Split(whole)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	appConfig.keysCommand = argv[0]
+	if len(argv) > 1 {
+		appConfig.keysCommandArgs = argv[1:]
+	} else {
+		appConfig.keysCommandArgs = appConfig.keysCommandArgs[:0]
 	}
 }

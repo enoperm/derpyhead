@@ -3,8 +3,7 @@ module derpyhead
 go 1.18
 
 require (
-	github.com/fsnotify/fsnotify v1.5.1
-	github.com/mattn/go-sqlite3 v1.14.9
+	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/viper v1.9.0
 	go4.org/mem v0.0.0-20210711025021-927187094b94
@@ -12,6 +11,7 @@ require (
 )
 
 require (
+	github.com/fsnotify/fsnotify v1.5.1 // indirect
 	github.com/hashicorp/hcl v1.0.0 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
 	github.com/magiconair/properties v1.8.5 // indirect
