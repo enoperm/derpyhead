@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net"
@@ -18,13 +19,7 @@ import (
 
 var serveCmd = &cobra.Command{
 	Use:   "serve",
-	Short: "A brief description of your application",
-	Long: `A longer description that spans multiple lines and likely contains
-examples and usage of using your application. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
+	Short: "Provide just enough of a tailscaled.sock to allow derper to work",
 	Run: func(cmd *cobra.Command, args []string) {
 		http.HandleFunc("/", respondPeerIds)
 		os.Remove(appConfig.listenAddr)
@@ -81,39 +76,36 @@ func fetchStatus() (status *ipnstate.Status, err error) {
 		namespace string
 	}
 
-	queue := make(chan record, 4)
-	go func() {
-		defer close(queue)
-		for rows.Next() {
-			var nodeKey, namespace string
-			rows.Scan(&nodeKey, &namespace)
-			if appConfig.includeRegex == nil || appConfig.includeRegex.MatchString(namespace) {
-				queue <- record{
-					nodeKey:   nodeKey,
-					namespace: namespace,
-				}
+	dummyStatus := &ipnstate.PeerStatus{}
+	process := func(nodeKey, namespace string) error {
+		if appConfig.excludeRegex != nil && appConfig.excludeRegex.MatchString(namespace) {
+			return nil
+		}
+
+		nodeKeyAssHex, err := hex.DecodeString(nodeKey)
+		if err != nil {
+			return err
+		}
+		k := key.NodePublicFromRaw32(mem.B(nodeKeyAssHex))
+		sb.AddPeer(k, dummyStatus)
+		return nil
+	}
+
+	for rows.Next() {
+		nodeKey, namespace := new(string), new(string)
+		rows.Scan(nodeKey, namespace)
+		if appConfig.includeRegex == nil || appConfig.includeRegex.MatchString(*namespace) {
+			err = process(*nodeKey, *namespace)
+			if err != nil {
+				return nil, err
 			}
 		}
-	}()
-
-	dummyStatus := &ipnstate.PeerStatus{}
-	for record := range queue {
-		if appConfig.excludeRegex != nil && appConfig.excludeRegex.MatchString(record.namespace) {
-			continue
-		}
-
-		nodeKey, err := key.NewPublicFromHexMem(mem.S(record.nodeKey))
-		if err != nil {
-			log.Println(err)
-			continue
-		}
-		sb.AddPeer(nodeKey, dummyStatus)
 	}
 
 	status = sb.Status()
 	var nullKey [32]byte
 
-	selfKey, _ := key.NewPublicFromHexMem(mem.B(nullKey[:]))
+	selfKey := key.NodePublicFromRaw32(mem.B(nullKey[:]))
 	status.Self = &ipnstate.PeerStatus{
 		PublicKey: selfKey,
 	}
