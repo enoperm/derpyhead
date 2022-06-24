@@ -5,7 +5,7 @@ as well as serving multiple tailnets with a single derper instance.
 It functions by asking a command (provided by you) about the node keys allowed to use the derper instance.
 Said command *MUST* return zero or more hex encoded node keys without any pre- or suffixes, and return zero on success, or non-zero on failure, in which case this service will retain the previously cached keys until the key-retrieval command succeeds again.
 
-This designs allows for using *arbitrary* sources for the keys.
+This design allows for using *arbitrary* sources for the keys.
 
 Some examples:
 
